@@ -1,0 +1,300 @@
+# 🚨 PROMETHEUS ALERT RULES
+# These alerts notify you when something goes wrong
+
+groups:
+  # ═══════════════════════════════════════════════════════════════
+  # 🖥️ SYSTEM ALERTS - Server health
+  # ═══════════════════════════════════════════════════════════════
+  - name: system_alerts
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          tier: system
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for more than 5 minutes\nCurrent value: {{ $value }}%"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          tier: system
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85%\nCurrent value: {{ $value }}%"
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: warning
+          tier: system
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk space is below 15% on {{ $labels.mountpoint }}\nAvailable: {{ $value }}%"
+
+      - alert: InstanceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+          tier: system
+        annotations:
+          summary: "Instance {{ $labels.instance }} is down"
+          description: "{{ $labels.job }} has been down for more than 2 minutes"
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🗄️ DATABASE ALERTS - RDS monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - name: database_alerts
+    interval: 30s
+    rules:
+      - alert: DatabaseHighCPU
+        expr: aws_rds_cpuutilization_average > 80
+        for: 5m
+        labels:
+          severity: warning
+          tier: database
+        annotations:
+          summary: "High CPU on RDS instance {{ $labels.dbinstance_identifier }}"
+          description: "RDS CPU usage is above 80%\nCurrent: {{ $value }}%"
+
+      - alert: DatabaseLowStorage
+        expr: aws_rds_free_storage_space_average < 5368709120  # 5GB in bytes
+        for: 5m
+        labels:
+          severity: critical
+          tier: database
+        annotations:
+          summary: "Low storage on RDS instance {{ $labels.dbinstance_identifier }}"
+          description: "RDS free storage is below 5GB"
+
+      - alert: DatabaseHighConnections
+        expr: aws_rds_database_connections_average > 80
+        for: 5m
+        labels:
+          severity: warning
+          tier: database
+        annotations:
+          summary: "High connection count on {{ $labels.dbinstance_identifier }}"
+          description: "Database has more than 80 active connections"
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🐳 CONTAINER ALERTS - ECS/Docker monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - name: container_alerts
+    interval: 30s
+    rules:
+      - alert: ContainerHighCPU
+        expr: rate(container_cpu_usage_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          tier: application
+        annotations:
+          summary: "High CPU in container {{ $labels.name }}"
+          description: "Container CPU usage above 80%\nCurrent: {{ $value }}%"
+
+      - alert: ContainerHighMemory
+        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          tier: application
+        annotations:
+          summary: "High memory in container {{ $labels.name }}"
+          description: "Container memory usage above 85%\nCurrent: {{ $value }}%"
+
+      - alert: ContainerRestarting
+        expr: rate(container_last_seen{name!=""}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          tier: application
+        annotations:
+          summary: "Container {{ $labels.name }} is restarting frequently"
+          description: "Container has restarted {{ $value }} times in the last 5 minutes"
+
+  # ═══════════════════════════════════════════════════════════════
+  # ⚖️ LOAD BALANCER ALERTS
+  # ═══════════════════════════════════════════════════════════════
+  - name: loadbalancer_alerts
+    interval: 30s
+    rules:
+      - alert: HighTargetResponseTime
+        expr: aws_alb_target_response_time_average > 1
+        for: 5m
+        labels:
+          severity: warning
+          tier: web
+        annotations:
+          summary: "High response time on {{ $labels.load_balancer }}"
+          description: "Target response time is above 1 second\nCurrent: {{ $value }}s"
+
+      - alert: UnhealthyTargets
+        expr: aws_alb_unhealthy_host_count_average > 0
+        for: 3m
+        labels:
+          severity: critical
+          tier: web
+        annotations:
+          summary: "Unhealthy targets in {{ $labels.target_group }}"
+          description: "{{ $value }} targets are unhealthy"
+
+      - alert: High5XXErrors
+        expr: rate(aws_alb_httpcode_target_5xx_count_sum[5m]) > 10
+        for: 5m
+        labels:
+          severity: critical
+          tier: web
+        annotations:
+          summary: "High 5XX error rate on {{ $labels.load_balancer }}"
+          description: "More than 10 5XX errors per second"
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🤖 SOAR ALERTS - Security automation monitoring
+  # REQ-NCA-P2-08: Monitor SOAR system itself
+  # ═══════════════════════════════════════════════════════════════
+  - name: soar_alerts
+    interval: 30s
+    rules:
+      - alert: SOARLambdaErrors
+        expr: rate(aws_lambda_errors_sum{function_name=~".*soar.*"}[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          tier: security
+          requirement: REQ-NCA-P2-08
+        annotations:
+          summary: "SOAR Lambda function {{ $labels.function_name }} has errors"
+          description: "SOAR function is experiencing errors\nError rate: {{ $value }}"
+
+      - alert: SOARHighDuration
+        expr: aws_lambda_duration_average{function_name=~".*soar.*"} > 25000  # 25 seconds
+        for: 5m
+        labels:
+          severity: warning
+          tier: security
+          requirement: REQ-NCA-P2-08
+        annotations:
+          summary: "SOAR function {{ $labels.function_name }} is slow"
+          description: "Function duration above 25 seconds\nCurrent: {{ $value }}ms"
+
+      - alert: SOARThrottling
+        expr: rate(aws_lambda_throttles_sum{function_name=~".*soar.*"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          tier: security
+          requirement: REQ-NCA-P2-08
+        annotations:
+          summary: "SOAR function {{ $labels.function_name }} is being throttled"
+          description: "Function is hitting concurrency limits"
+
+  # ═══════════════════════════════════════════════════════════════
+  # 📊 MONITORING STACK ALERTS - Monitor the monitors!
+  # ═══════════════════════════════════════════════════════════════
+  - name: monitoring_alerts
+    interval: 30s
+    rules:
+      - alert: PrometheusDown
+        expr: up{job="prometheus"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          tier: monitoring
+        annotations:
+          summary: "Prometheus is down!"
+          description: "Prometheus has been down for more than 2 minutes"
+
+      - alert: GrafanaDown
+        expr: up{job="grafana"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          tier: monitoring
+        annotations:
+          summary: "Grafana is down"
+          description: "Cannot access Grafana dashboards"
+
+      - alert: LokiDown
+        expr: up{job="loki"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          tier: monitoring
+        annotations:
+          summary: "Loki is down"
+          description: "Log aggregation is not working"
+
+      - alert: PrometheusTSDBReloadsFailing
+        expr: increase(prometheus_tsdb_reloads_failures_total[1h]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          tier: monitoring
+        annotations:
+          summary: "Prometheus TSDB reloads are failing"
+          description: "{{ $value }} reload failures in the last hour"
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🔐 VPN ALERTS - Hybrid connectivity
+  # ═══════════════════════════════════════════════════════════════
+  - name: vpn_alerts
+    interval: 30s
+    rules:
+      - alert: VPNTunnelDown
+        expr: aws_vpn_tunnel_state == 0
+        for: 5m
+        labels:
+          severity: critical
+          tier: network
+        annotations:
+          summary: "VPN tunnel {{ $labels.tunnel_id }} is down"
+          description: "Connection to on-premises is lost"
+
+      - alert: VPNHighPacketLoss
+        expr: aws_vpn_tunnel_data_out_packet_loss_rate > 5
+        for: 5m
+        labels:
+          severity: warning
+          tier: network
+        annotations:
+          summary: "High packet loss on VPN tunnel {{ $labels.tunnel_id }}"
+          description: "Packet loss is above 5%\nCurrent: {{ $value }}%"
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🔥 SECURITY ALERTS - Unusual activity
+  # ═══════════════════════════════════════════════════════════════
+  - name: security_alerts
+    interval: 30s
+    rules:
+      - alert: UnusualNetworkTraffic
+        expr: rate(node_network_receive_bytes_total[5m]) > 100000000  # 100 MB/s
+        for: 5m
+        labels:
+          severity: warning
+          tier: security
+        annotations:
+          summary: "Unusual network traffic on {{ $labels.instance }}"
+          description: "Network receive rate is unusually high\nCurrent: {{ $value }} bytes/s"
+
+      - alert: TooManyFailedSSHLogins
+        expr: rate(node_auth_failures_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          tier: security
+        annotations:
+          summary: "Multiple failed SSH attempts on {{ $labels.instance }}"
+          description: "More than 5 failed login attempts per minute"
+
+# 💡 How to test alerts:
+# 1. Temporarily lower thresholds
+# 2. Check Prometheus UI: http://prometheus:9090/alerts
+# 3. View in Alertmanager: http://alertmanager:9093

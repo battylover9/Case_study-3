@@ -1,0 +1,183 @@
+# 📊 PROMETHEUS CONFIGURATION
+# This tells Prometheus what to monitor and where to find it
+
+global:
+  scrape_interval: 15s  # How often to collect metrics
+  evaluation_interval: 15s  # How often to evaluate alerting rules
+  
+  external_labels:
+    cluster: 'hybrid-cloud-school'
+    environment: 'production'
+
+# 🚨 ALERTING - Send alerts to Alertmanager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# 📋 ALERT RULES - Load alert definitions
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+# 🎯 SCRAPE CONFIGURATIONS - What to monitor
+scrape_configs:
+  # ═══════════════════════════════════════════════════════════════
+  # 📊 Prometheus itself
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+          tier: 'monitoring'
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🖥️ Node Exporter - System metrics
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node-exporter'
+          tier: 'monitoring'
+          instance: 'monitoring-server'
+
+  # ═══════════════════════════════════════════════════════════════
+  # 📈 Grafana metrics
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+        labels:
+          service: 'grafana'
+          tier: 'monitoring'
+
+  # ═══════════════════════════════════════════════════════════════
+  # 📝 Loki metrics
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+        labels:
+          service: 'loki'
+          tier: 'monitoring'
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🐳 cAdvisor - Container metrics
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          service: 'cadvisor'
+          tier: 'monitoring'
+
+  # ═══════════════════════════════════════════════════════════════
+  # ☁️ AWS CloudWatch Exporter (if installed)
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'cloudwatch'
+    static_configs:
+      - targets: ['localhost:9106']
+        labels:
+          service: 'cloudwatch-exporter'
+          tier: 'aws'
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🐳 ECS Service Discovery - Auto-discover ECS tasks
+  # REQ-NCA-P2-08: Monitor SOAR and other services
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'ecs-tasks'
+    ec2_sd_configs:
+      - region: eu-west-1
+        port: 9090
+        filters:
+          - name: tag:AnsibleGroup
+            values:
+              - app
+    
+    relabel_configs:
+      # Use private IP
+      - source_labels: [__meta_ec2_private_ip]
+        target_label: __address__
+        replacement: ${1}:9090
+      
+      # Add instance name from tags
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance
+      
+      # Add service name from tags
+      - source_labels: [__meta_ec2_tag_Service]
+        target_label: service
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🗄️ RDS Exporter - Database metrics (if installed)
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'rds'
+    static_configs:
+      - targets: ['localhost:9042']
+        labels:
+          service: 'rds-exporter'
+          tier: 'database'
+
+  # ═══════════════════════════════════════════════════════════════
+  # ⚖️ Load Balancer metrics via CloudWatch
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'alb'
+    static_configs:
+      - targets: ['localhost:9106']
+        labels:
+          service: 'alb'
+          tier: 'web'
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🤖 SOAR Lambda Functions - Serverless metrics
+  # REQ-NCA-P2-08: SOAR monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'soar-lambda'
+    static_configs:
+      - targets: ['localhost:9106']
+        labels:
+          service: 'soar'
+          tier: 'security'
+          component: 'lambda'
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🏠 On-Premises Servers (via VPN)
+  # Add your on-prem servers here
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'on-premises'
+    static_configs:
+      - targets: 
+          # Add your on-prem servers with node_exporter
+          # Example:
+          # - '192.168.1.10:9100'
+          # - '192.168.1.11:9100'
+        labels:
+          environment: 'on-premises'
+          location: 'datacenter'
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🔍 Blackbox Exporter - Endpoint monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'blackbox-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://grafana:3000
+          - http://prometheus:9090
+          - http://loki:3100
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+# 💡 To add more targets:
+# 1. Install exporters on your servers (node_exporter, postgres_exporter, etc.)
+# 2. Add them to scrape_configs above
+# 3. Reload Prometheus config: curl -X POST http://localhost:9090/-/reload
